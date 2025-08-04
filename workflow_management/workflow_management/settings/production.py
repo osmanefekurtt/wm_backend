@@ -20,6 +20,10 @@ ALLOWED_HOSTS = [
     '127.0.0.1',
     '192.168.1.236',  # Local IP
     '.mythos.com.tr',  # Domain ve subdomainler için
+    'http://172.23.0.7:8000/',
+    '172.23.0.7:8000',
+    '172.23.0.7',
+    'https://172.23.0.7:8000/'
     # Production'da eklenecekler:
     # 'yourdomain.com',
     # 'www.yourdomain.com',
