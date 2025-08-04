@@ -3,7 +3,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser
-from .models import Role, UserRole, ColumnPermission, SystemPermission
+from .models import Role, UserRole, ColumnPermission
 from .serializers import (
     RoleSerializer, RoleCreateUpdateSerializer, 
     UserRoleSerializer, ColumnPermissionSerializer
@@ -19,40 +19,16 @@ from rest_framework.response import Response
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_my_system_permissions(request):
-    """Kullanıcının sistem izinlerini döndür"""
-    if request.user.is_superuser:
-        return Response({
-            'success': True,
-            'data': {
-                'work_create': True,
-                'work_delete': True,
-                'work_reorder': True  # YENİ
-            }
-        })
+    """
+    Kullanıcının sistem izinlerini döndürür
+    """
+    permissions = PermissionChecker.get_user_system_permissions(request.user)
     
-    permissions = {
-        'work_create': False,
-        'work_delete': False,
-        'work_reorder': False  # YENİ
-    }
-    
-    # Kullanıcının rollerini al
-    user_roles = UserRole.objects.filter(user=request.user).values_list('role', flat=True)
-    
-    # Bu roller için sistem izinlerini kontrol et
-    system_perms = SystemPermission.objects.filter(
-        role__in=user_roles,
-        granted=True
-    ).values('permission_type')
-    
-    for perm in system_perms:
-        perm_type = perm['permission_type']
-        if perm_type in permissions:
-            permissions[perm_type] = True
-    
+    # CustomJSONRenderer zaten sarmalıyor, direkt veriyi dönelim
     return Response({
-        'success': True,
-        'data': permissions
+        'work_create': permissions.get('work_create', False),
+        'work_delete': permissions.get('work_delete', False),
+        'is_superuser': request.user.is_superuser
     })
 
 class RoleViewSet(viewsets.ModelViewSet):
