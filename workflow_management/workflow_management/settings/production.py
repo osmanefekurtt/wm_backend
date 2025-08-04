@@ -37,7 +37,7 @@ if os.environ.get('ALLOWED_HOSTS'):
 # Database - Production (Environment variables kullanarak)
 DATABASES = {
     'default': {
-        'ENGINE': 'sql_server.pyodbc',  # mssql-django kullanıyoruz
+        'ENGINE': 'mssql',  # mssql-django kullanıyoruz
         'NAME': os.environ.get('DB_NAME', 'Mythos.WorkflowManagement'),
         'USER': os.environ.get('DB_USER', ''),
         'PASSWORD': os.environ.get('DB_PASSWORD', ''),
