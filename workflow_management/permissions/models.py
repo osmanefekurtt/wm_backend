@@ -35,16 +35,17 @@ class ColumnPermission(models.Model):
         ('type', 'Tip'),
         ('sales_channel', 'Satış Kanalı'),
         ('designer', 'Tasarımcı'),
-        ('designer_text', 'Tasarımcı (Metin)'),  # YENİ
+        ('designer_text', 'Tasarımcı (Metin)'),
         ('design_start_date', 'Tasarım Başlangıç Tarihi'),
         ('design_end_date', 'Tasarım Bitiş Tarihi'),
-        ('confirm_date', 'Onay Tarihi'),
+        ('confirm_date', 'Onay Tarihi'),  # Eski - geriye uyumluluk için tutulacak
+        ('confirmations', 'Onaylar'),  # YENİ
         ('material_info', 'Malzeme Bilgileri'),
         ('printing_location', 'Baskı Lokasyonu'),
         ('printing_confirm', 'Baskı Onayı'),
         ('printing_control', 'Baskı Kontrolü'),
         ('printing_controller', 'Kontrolü Yapan Kişi'),
-        ('printing_controller_text', 'Kontrolü Yapan (Metin)'),  # YENİ
+        ('printing_controller_text', 'Kontrolü Yapan (Metin)'),
         ('printing_start_date', 'Baskı Başlangıç Tarihi'),
         ('printing_end_date', 'Baskı Bitiş Tarihi'),
         ('mixed', 'Karışık'),

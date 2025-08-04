@@ -5,6 +5,7 @@ from django.utils import timezone
 from django.contrib.auth.models import User
 from workflows.models import Work, Movement, Category, SalesChannel, WorkType
 from permissions.utils import PermissionChecker
+from datetime import datetime
 
 
 class LinkListField(serializers.ListField):
@@ -51,6 +52,49 @@ class LinkListField(serializers.ListField):
         } for link in value]
 
 
+class ConfirmationListField(serializers.ListField):
+    """Onay listesi için özel field"""
+    
+    def to_internal_value(self, data):
+        if not isinstance(data, list):
+            raise serializers.ValidationError('Onaylar liste formatında olmalıdır.')
+        
+        validated_confirmations = []
+        
+        for i, item in enumerate(data):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(f'Onay {i+1}: Geçersiz format')
+            
+            date_str = item.get('date', '').strip()
+            if not date_str:
+                raise serializers.ValidationError(f'Onay {i+1}: Tarih alanı zorunludur')
+            
+            # Tarih formatı kontrolü
+            try:
+                datetime.strptime(date_str, '%Y-%m-%d')
+            except ValueError:
+                raise serializers.ValidationError(f'Onay {i+1}: Geçersiz tarih formatı (YYYY-MM-DD olmalı)')
+            
+            validated_confirmations.append({
+                'date': date_str,
+                'text': item.get('text', '').strip() or None,
+                'added_at': item.get('added_at') or timezone.now().isoformat(),
+                'added_by': item.get('added_by')
+            })
+        
+        return validated_confirmations
+    
+    def to_representation(self, value):
+        """Çıktıda gereksiz None değerleri temizle"""
+        if not value:
+            return []
+        
+        return [{
+            'date': confirmation.get('date'),
+            **{k: v for k, v in confirmation.items() if k != 'date' and v is not None}
+        } for confirmation in value]
+
+
 class BaseDropdownSerializer(serializers.ModelSerializer):
     """Dropdown modelleri için base serializer"""
     class Meta:
@@ -87,8 +131,9 @@ class WorkflowSerializer(serializers.ModelSerializer):
     designer_detail = serializers.SerializerMethodField()
     printing_controller_detail = serializers.SerializerMethodField()
     
-    # Links field
+    # JSON fields
     links = LinkListField(required=False, allow_empty=True)
+    confirmations = ConfirmationListField(required=False, allow_empty=True)
     
     # Foreign key fields
     category = serializers.PrimaryKeyRelatedField(
@@ -119,7 +164,20 @@ class WorkflowSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Work
-        fields = '__all__'
+        fields = [
+            'id', 'name', 'category', 'price', 'type', 'sales_channel',
+            'designer', 'designer_text', 'design_start_date', 'design_end_date',
+            'confirmations', 'material_info', 'printing_location', 'printing_confirm',
+            'printing_control', 'printing_controller', 'printing_controller_text',
+            'printing_control_date', 'printing_start_date', 'printing_end_date',
+            'mixed', 'packaging_date', 'stock_entry', 'shipping_date',
+            'links', 'note', 'created', 'updated',
+            # Calculated fields
+            'status_code', 'status_text', 'status_color',
+            # Detail fields
+            'category_detail', 'type_detail', 'sales_channel_detail',
+            'designer_detail', 'printing_controller_detail'
+        ]
     
     def get_user_detail(self, user):
         """Kullanıcı detay bilgisi"""
@@ -163,21 +221,66 @@ class WorkflowSerializer(serializers.ModelSerializer):
             data['link'] = instance.links[0].get('url')
             data['link_title'] = instance.links[0].get('title', '')
         
+        # Legacy confirm_date alanı (geriye uyumluluk için)
+        if instance.confirmations and len(instance.confirmations) > 0:
+            # En son onay tarihini al
+            sorted_confirmations = sorted(instance.confirmations, key=lambda x: x.get('date', ''), reverse=True)
+            data['confirm_date'] = sorted_confirmations[0].get('date')
+        
         return data
             
     def create(self, validated_data):
-        """Link eklerken kullanıcı bilgisini ekle"""
+        """Oluştururken kullanıcı bilgisini ekle"""
         request = self.context.get('request')
-        if request and validated_data.get('links'):
+        if request:
             user = request.user
             user_info = f"{user.get_full_name() or user.username} ({user.id})"
             timestamp = timezone.now().isoformat()
             
-            for link in validated_data['links']:
-                link['added_by'] = user_info
-                link['added_at'] = timestamp
+            # Links'e kullanıcı bilgisi ekle
+            if validated_data.get('links'):
+                for link in validated_data['links']:
+                    link['added_by'] = user_info
+                    link['added_at'] = timestamp
+            
+            # Confirmations'a kullanıcı bilgisi ekle
+            if validated_data.get('confirmations'):
+                for confirmation in validated_data['confirmations']:
+                    confirmation['added_by'] = user_info
+                    confirmation['added_at'] = timestamp
         
         return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        """Güncelleme işlemleri"""
+        request = self.context.get('request')
+        
+        # Confirmations güncellemesi için kullanıcı bilgisi ekle
+        if 'confirmations' in validated_data and request:
+            user = request.user
+            user_info = f"{user.get_full_name() or user.username} ({user.id})"
+            timestamp = timezone.now().isoformat()
+            
+            # Yeni eklenen onayları tespit et ve kullanıcı bilgisi ekle
+            new_confirmations = validated_data.get('confirmations', [])
+            existing_confirmations = instance.confirmations or []
+            
+            # Yeni onayları bul (tarih bazlı karşılaştırma)
+            existing_dates = {conf.get('date') for conf in existing_confirmations}
+            
+            for confirmation in new_confirmations:
+                if confirmation.get('date') not in existing_dates:
+                    confirmation['added_by'] = user_info
+                    confirmation['added_at'] = timestamp
+        
+        # Printing control date
+        if validated_data.get('printing_control') and not instance.printing_control:
+            validated_data['printing_control_date'] = timezone.now()
+        elif 'printing_control' in validated_data and not validated_data['printing_control']:
+            validated_data['printing_controller'] = None
+            validated_data['printing_control_date'] = None
+        
+        return super().update(instance, validated_data)
     
     def validate(self, attrs):
         """İş mantığı ve yetki kontrolü"""
@@ -200,17 +303,6 @@ class WorkflowSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(error_message)
         
         return attrs
-    
-    def update(self, instance, validated_data):
-        """Güncelleme işlemleri"""
-        # Printing control date
-        if validated_data.get('printing_control') and not instance.printing_control:
-            validated_data['printing_control_date'] = timezone.now()
-        elif 'printing_control' in validated_data and not validated_data['printing_control']:
-            validated_data['printing_controller'] = None
-            validated_data['printing_control_date'] = None
-        
-        return super().update(instance, validated_data)
 
 
 class MovementSerializer(serializers.ModelSerializer):

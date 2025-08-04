@@ -62,7 +62,18 @@ class Work(models.Model):
     designer_text = models.CharField(max_length=200, blank=True, null=True, verbose_name='Tasarımcı (Metin)')
     design_start_date = models.DateField(verbose_name='Tasarım Başlangıç Tarihi', blank=True, null=True)
     design_end_date = models.DateField(verbose_name='Tasarım Bitiş Tarihi', blank=True, null=True)
-    confirm_date = models.DateField(verbose_name='Onay Tarihi', blank=True, null=True)
+    
+    # Onay bilgileri - Yeni JSON field
+    confirmations = models.JSONField(
+        verbose_name='Onaylar',
+        default=list,
+        blank=True,
+        help_text='[{"date": "2024-01-01", "text": "Onay metni", "added_by": "User Name", "added_at": "2024-01-01T12:00:00"}]'
+    )
+    
+    # Eski confirm_date field'ı - migration için geçici olarak tutulacak
+    confirm_date = models.DateField(verbose_name='Onay Tarihi (Eski)', blank=True, null=True)
+    
     material_info = models.TextField(verbose_name='Malzeme Bilgileri', blank=True, null=True)
     
     # Baskı bilgileri
@@ -103,23 +114,38 @@ class Work(models.Model):
         return f"{self.name} - {self.category}"
     
     def clean(self):
-        """Link formatlarını validate et"""
-        if not self.links:
-            return
-            
-        validator = URLValidator()
-        for i, link_data in enumerate(self.links):
-            if not isinstance(link_data, dict):
-                raise ValidationError(f'Bağlantı {i+1}: Geçersiz format')
-            
-            url = link_data.get('url')
-            if not url:
-                raise ValidationError(f'Bağlantı {i+1}: URL zorunludur')
-            
-            try:
-                validator(url)
-            except ValidationError:
-                raise ValidationError(f'Bağlantı {i+1}: Geçersiz URL formatı')
+        """Link ve onay formatlarını validate et"""
+        # Link validasyonu
+        if self.links:
+            validator = URLValidator()
+            for i, link_data in enumerate(self.links):
+                if not isinstance(link_data, dict):
+                    raise ValidationError(f'Bağlantı {i+1}: Geçersiz format')
+                
+                url = link_data.get('url')
+                if not url:
+                    raise ValidationError(f'Bağlantı {i+1}: URL zorunludur')
+                
+                try:
+                    validator(url)
+                except ValidationError:
+                    raise ValidationError(f'Bağlantı {i+1}: Geçersiz URL formatı')
+        
+        # Onay validasyonu
+        if self.confirmations:
+            for i, confirmation in enumerate(self.confirmations):
+                if not isinstance(confirmation, dict):
+                    raise ValidationError(f'Onay {i+1}: Geçersiz format')
+                
+                if not confirmation.get('date'):
+                    raise ValidationError(f'Onay {i+1}: Tarih zorunludur')
+                
+                # Tarih formatı kontrolü için
+                try:
+                    from datetime import datetime
+                    datetime.strptime(str(confirmation['date']), '%Y-%m-%d')
+                except ValueError:
+                    raise ValidationError(f'Onay {i+1}: Geçersiz tarih formatı (YYYY-MM-DD olmalı)')
     
     @property
     def calculated_status(self):

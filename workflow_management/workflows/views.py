@@ -12,6 +12,7 @@ from workflows.serializer import (
 )
 from .audit_utils import log_work_action
 from permissions.utils import PermissionChecker
+from datetime import datetime
 
 
 class BaseDropdownViewSet(viewsets.ModelViewSet):
@@ -141,6 +142,93 @@ class WorkflowViewSet(viewsets.ModelViewSet):
         )
         
         return Response({'message': 'Bağlantı silindi', 'links': work.links})
+    
+    @action(detail=True, methods=['post'])
+    def add_confirmation(self, request, pk=None):
+        """Onay ekleme"""
+        work = self.get_object()
+        
+        # Yeni yetki kontrolü - confirmations yerine confirm_date kontrolü
+        if not PermissionChecker.can_write_column(request.user, 'confirm_date'):
+            return Response({'message': 'Onay ekleme yetkiniz yok'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        
+        confirmation_data = {
+            'date': request.data.get('date'),
+            'text': request.data.get('text', '').strip() or None
+        }
+        
+        # Tarih validasyonu
+        if not confirmation_data['date']:
+            return Response({'message': 'Tarih alanı zorunludur'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            datetime.strptime(confirmation_data['date'], '%Y-%m-%d')
+        except ValueError:
+            return Response({'message': 'Geçersiz tarih formatı (YYYY-MM-DD olmalı)'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        # Onay ekle
+        current_confirmations = work.confirmations or []
+        
+        # Aynı tarihte onay var mı kontrol et
+        if any(conf.get('date') == confirmation_data['date'] for conf in current_confirmations):
+            return Response({'message': 'Bu tarihte zaten bir onay mevcut'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        confirmation_data['added_by'] = f"{request.user.get_full_name() or request.user.username} ({request.user.id})"
+        confirmation_data['added_at'] = timezone.now().isoformat()
+        
+        current_confirmations.append(confirmation_data)
+        work.confirmations = current_confirmations
+        work.save()
+        
+        # Log
+        log_work_action(
+            user=request.user,
+            work=work,
+            action='update',
+            old_data={'confirmations_count': len(current_confirmations) - 1},
+            new_data={'confirmations_count': len(current_confirmations)}
+        )
+        
+        return Response({'message': 'Onay eklendi', 'confirmations': work.confirmations})
+    
+    @action(detail=True, methods=['post'])
+    def remove_confirmation(self, request, pk=None):
+        """Onay silme"""
+        work = self.get_object()
+        
+        if not PermissionChecker.can_write_column(request.user, 'confirm_date'):
+            return Response({'message': 'Onay silme yetkiniz yok'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        
+        date_to_remove = request.data.get('date')
+        if not date_to_remove:
+            return Response({'message': 'Silinecek onay tarihi gerekli'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        current_confirmations = work.confirmations or []
+        new_confirmations = [conf for conf in current_confirmations if conf.get('date') != date_to_remove]
+        
+        if len(new_confirmations) == len(current_confirmations):
+            return Response({'message': 'Onay bulunamadı'}, 
+                          status=status.HTTP_404_NOT_FOUND)
+        
+        work.confirmations = new_confirmations
+        work.save()
+        
+        # Log
+        log_work_action(
+            user=request.user,
+            work=work,
+            action='update',
+            old_data={'confirmations_count': len(current_confirmations)},
+            new_data={'confirmations_count': len(new_confirmations)}
+        )
+        
+        return Response({'message': 'Onay silindi', 'confirmations': work.confirmations})
     
     def list(self, request, *args, **kwargs):
         """Liste görünümü - yetki filtreli"""
