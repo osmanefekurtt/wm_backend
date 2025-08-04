@@ -171,7 +171,7 @@ class WorkflowSerializer(serializers.ModelSerializer):
             'printing_control', 'printing_controller', 'printing_controller_text',
             'printing_control_date', 'printing_start_date', 'printing_end_date',
             'mixed', 'packaging_date', 'stock_entry', 'shipping_date',
-            'links', 'note', 'created', 'updated',
+            'links', 'note', 'priority', 'created', 'updated',  # priority eklendi
             # Calculated fields
             'status_code', 'status_text', 'status_color',
             # Detail fields

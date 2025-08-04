@@ -71,6 +71,14 @@ class Work(models.Model):
         help_text='[{"date": "2024-01-01", "text": "Onay metni", "added_by": "User Name", "added_at": "2024-01-01T12:00:00"}]'
     )
     
+    # Priority field - Önem sırası
+    priority = models.IntegerField(
+        verbose_name='Önem Sırası',
+        default=0,
+        db_index=True,
+        help_text='Düşük numara = Yüksek öncelik (1 en önemli)'
+    )
+    
     # Eski confirm_date field'ı - migration için geçici olarak tutulacak
     confirm_date = models.DateField(verbose_name='Onay Tarihi (Eski)', blank=True, null=True)
     
@@ -187,10 +195,19 @@ class Work(models.Model):
             return self.printing_controller.get_full_name() or self.printing_controller.username
         return None
     
+    def save(self, *args, **kwargs):
+        """Save override - yeni kayıtta priority ayarla"""
+        if not self.pk and self.priority == 0:
+            # Yeni kayıt ve priority verilmemişse, en sona ekle
+            max_priority = Work.objects.aggregate(models.Max('priority'))['priority__max'] or 0
+            self.priority = max_priority + 1
+        
+        super().save(*args, **kwargs)
+    
     class Meta:
         verbose_name = 'İş'
         verbose_name_plural = 'İşler'
-        ordering = ['-created']
+        ordering = ['priority', '-created']  # Önce priority'e göre, sonra oluşturma tarihine göre sırala
 
 
 class Movement(models.Model):

@@ -38,8 +38,8 @@ class ColumnPermission(models.Model):
         ('designer_text', 'Tasarımcı (Metin)'),
         ('design_start_date', 'Tasarım Başlangıç Tarihi'),
         ('design_end_date', 'Tasarım Bitiş Tarihi'),
-        ('confirm_date', 'Onay Tarihi'),  # Eski - geriye uyumluluk için tutulacak
-        ('confirmations', 'Onaylar'),  # YENİ
+        ('confirmations', 'Onaylar'),  # confirmations field'ı için
+        ('priority', 'Önem Sırası'),  # YENİ - priority field'ı için
         ('material_info', 'Malzeme Bilgileri'),
         ('printing_location', 'Baskı Lokasyonu'),
         ('printing_confirm', 'Baskı Onayı'),
@@ -69,29 +69,6 @@ class ColumnPermission(models.Model):
         unique_together = ['role', 'column_name']
         ordering = ['role', 'column_name']
 
-
-class SystemPermission(models.Model):
-    """Sistem genelinde işlem izinleri"""
-    
-    PERMISSION_CHOICES = [
-        ('work_create', 'İş Oluşturma'),
-        ('work_delete', 'İş Silme'),
-    ]
-    
-    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name='system_permissions', verbose_name='Rol')
-    permission_type = models.CharField(max_length=50, choices=PERMISSION_CHOICES, verbose_name='İzin Tipi')
-    granted = models.BooleanField(default=False, verbose_name='İzin Verildi mi?')
-    
-    def __str__(self):
-        status = '✓' if self.granted else '✗'
-        return f"{self.role.name} - {self.get_permission_type_display()} - {status}"
-    
-    class Meta:
-        verbose_name = 'Sistem İzni'
-        verbose_name_plural = 'Sistem İzinleri'
-        unique_together = ['role', 'permission_type']
-
-
 class UserRole(models.Model):
     """Kullanıcı-Rol ilişkisi"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='user_roles', verbose_name='Kullanıcı')
@@ -111,3 +88,34 @@ class UserRole(models.Model):
         verbose_name_plural = 'Kullanıcı Rolleri'
         unique_together = ['user', 'role']
         ordering = ['user__username', 'role__name']
+
+
+class SystemPermission(models.Model):
+    """Sistem genelinde izinler"""
+    
+    PERMISSION_TYPE_CHOICES = [
+        ('work_create', 'İş Oluşturma'),
+        ('work_delete', 'İş Silme'),
+        ('work_reorder', 'İş Sıralama'),  # YENİ EKLENEN
+    ]
+    
+    role = models.ForeignKey(
+        Role,
+        on_delete=models.CASCADE,
+        related_name='system_permissions',
+        verbose_name='Rol'
+    )
+    permission_type = models.CharField(
+        max_length=50,
+        choices=PERMISSION_TYPE_CHOICES,
+        verbose_name='İzin Tipi'
+    )
+    granted = models.BooleanField(
+        default=False,
+        verbose_name='İzin Verildi mi?'
+    )
+    
+    class Meta:
+        verbose_name = 'Sistem İzni'
+        verbose_name_plural = 'Sistem İzinleri'
+        unique_together = ['role', 'permission_type']

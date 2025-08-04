@@ -14,6 +14,7 @@ from .audit_utils import log_work_action
 from permissions.utils import PermissionChecker
 from datetime import datetime
 
+from django.db import transaction
 
 class BaseDropdownViewSet(viewsets.ModelViewSet):
     """Dropdown yönetimi için base viewset"""
@@ -49,7 +50,152 @@ class WorkflowViewSet(viewsets.ModelViewSet):
     queryset = Work.objects.all()
     serializer_class = WorkflowSerializer
     permission_classes = [IsAuthenticated]
+
+    @action(detail=True, methods=['post'])
+    def set_priority(self, request, pk=None):
+        """İşin öncelik sırasını değiştir"""
+        work = self.get_object()
+        new_priority = request.data.get('priority')
+        
+        # Yetki kontrolü
+        if not request.user.is_superuser and not self._can_reorder_works(request.user):
+            return Response(
+                {'message': 'İşleri sıralama yetkiniz yok'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Validasyon
+        if new_priority is None:
+            return Response(
+                {'message': 'Yeni sıra numarası gerekli'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            new_priority = int(new_priority)
+            if new_priority < 1:
+                raise ValueError()
+        except (ValueError, TypeError):
+            return Response(
+                {'message': 'Geçerli bir sıra numarası girin (1 veya daha büyük)'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Sıralama işlemi
+        with transaction.atomic():
+            old_priority = work.priority
+            
+            if new_priority == old_priority:
+                return Response({'message': 'İş zaten bu sırada'})
+            
+            # Tüm işleri priority'e göre sırala
+            all_works = Work.objects.all().order_by('priority')
+            
+            # Mevcut işi listeden çıkar
+            works_list = list(all_works.exclude(id=work.id))
+            
+            # Yeni pozisyona ekle (0-indexed to 1-indexed)
+            works_list.insert(new_priority - 1, work)
+            
+            # Tüm priority'leri güncelle
+            for index, w in enumerate(works_list, start=1):
+                if w.priority != index:
+                    Work.objects.filter(id=w.id).update(priority=index)
+            
+            # Log
+            log_work_action(
+                user=request.user,
+                work=work,
+                action='update',
+                old_data={'priority': old_priority},
+                new_data={'priority': new_priority}
+            )
+        
+        # Güncel veriyi döndür
+        work.refresh_from_db()
+        serializer = self.get_serializer(work)
+        filtered_data = self._filter_by_permissions(serializer.data, request.user)
+        
+        return Response({
+            'message': 'Sıralama güncellendi',
+            'data': filtered_data
+        })
     
+    @action(detail=False, methods=['post'])
+    def reorder_bulk(self, request):
+        """Toplu sıralama güncelleme"""
+        # Yetki kontrolü
+        if not request.user.is_superuser and not self._can_reorder_works(request.user):
+            return Response(
+                {'message': 'İşleri sıralama yetkiniz yok'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        reorder_data = request.data.get('reorder', [])
+        
+        if not isinstance(reorder_data, list):
+            return Response(
+                {'message': 'Geçersiz veri formatı'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        with transaction.atomic():
+            for item in reorder_data:
+                work_id = item.get('id')
+                new_priority = item.get('priority')
+                
+                if work_id and new_priority is not None:
+                    try:
+                        Work.objects.filter(id=work_id).update(priority=new_priority)
+                    except Exception:
+                        pass
+            
+            # Log
+            log_work_action(
+                user=request.user,
+                work=None,
+                action='update',
+                description=f'{len(reorder_data)} işin sıralaması güncellendi'
+            )
+        
+        return Response({'message': 'Sıralama güncellendi'})
+    
+    @action(detail=False, methods=['post'])
+    def normalize_priorities(self, request):
+        """Priority değerlerini normalize et (1'den başlayarak sıralı yap)"""
+        # Sadece superuser
+        if not request.user.is_superuser:
+            return Response(
+                {'message': 'Bu işlem için yetkiniz yok'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        with transaction.atomic():
+            works = Work.objects.all().order_by('priority', '-created')
+            
+            for index, work in enumerate(works, start=1):
+                if work.priority != index:
+                    Work.objects.filter(id=work.id).update(priority=index)
+        
+        return Response({'message': 'Sıralama normalize edildi'})
+    
+    def _can_reorder_works(self, user):
+        """Kullanıcının iş sıralama yetkisi var mı?"""
+        try:
+            from permissions.models import UserRole, SystemPermission
+            # Kullanıcının rollerini al
+            user_roles = UserRole.objects.filter(user=user).values_list('role', flat=True)
+            
+            # Bu roller için work_reorder izni var mı kontrol et
+            return SystemPermission.objects.filter(
+                role__in=user_roles,
+                permission_type='work_reorder',
+                granted=True
+            ).exists()
+        except Exception as e:
+            print(f"Permission check error: {e}")
+            return False
+
     def _filter_by_permissions(self, data, user):
         """Yetki bazlı filtreleme"""
         if isinstance(data, list):
