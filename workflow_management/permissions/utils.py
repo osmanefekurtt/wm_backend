@@ -1,46 +1,103 @@
-from django.contrib.auth.models import User
+# permissions/utils.py
 from .models import UserRole, ColumnPermission, SystemPermission
 
-
 class PermissionChecker:
-    """Kullanıcı yetki kontrolü için yardımcı sınıf"""
-    
-    # Her zaman görülebilecek sistem alanları
-    SYSTEM_FIELDS = [
-        'id', 'created', 'updated', 
-        'status_code', 'status_text', 'status_color',
-        'category_detail', 'type_detail', 'sales_channel_detail',
-        'category_name', 'type_name', 'sales_channel_name'
-    ]
+    """Yetki kontrolü için yardımcı sınıf"""
     
     @staticmethod
     def get_user_column_permissions(user):
-        """Kullanıcının tüm kolon yetkilerini döndürür"""
+        """Kullanıcının kolon yetkilerini döndürür"""
         if user.is_superuser:
-            return {choice[0]: 'write' for choice in ColumnPermission.COLUMN_CHOICES}
+            # Superuser tüm kolonlara yazma yetkisine sahip
+            from workflows.models import Work
+            all_fields = [f.name for f in Work._meta.get_fields() if not f.auto_created]
+            return {field: 'write' for field in all_fields}
         
         permissions = {}
+        
+        # Kullanıcının rollerini al
         user_roles = UserRole.objects.filter(user=user).select_related('role')
         
         for user_role in user_roles:
-            role_permissions = ColumnPermission.objects.filter(role=user_role.role)
+            # Her rol için kolon yetkilerini al
+            column_perms = ColumnPermission.objects.filter(role=user_role.role)
             
-            for perm in role_permissions:
+            for perm in column_perms:
+                # Daha yüksek yetki varsa onu kullan
                 current_perm = permissions.get(perm.column_name, 'none')
                 
-                # Daha yüksek yetkiyi al (none < read < write)
-                if perm.permission == 'write' or (perm.permission == 'read' and current_perm != 'write'):
-                    permissions[perm.column_name] = perm.permission
+                if perm.permission == 'write':
+                    permissions[perm.column_name] = 'write'
+                elif perm.permission == 'read' and current_perm != 'write':
+                    permissions[perm.column_name] = 'read'
         
         return permissions
+    
+    @staticmethod
+    def can_read_column(user, column_name):
+        """Kullanıcının belirtilen kolonu okuma yetkisi var mı?"""
+        if user.is_superuser:
+            return True
+        
+        permissions = PermissionChecker.get_user_column_permissions(user)
+        perm = permissions.get(column_name, 'none')
+        return perm in ['read', 'write']
+    
+    @staticmethod
+    def can_write_column(user, column_name):
+        """Kullanıcının belirtilen kolona yazma yetkisi var mı?"""
+        if user.is_superuser:
+            return True
+        
+        permissions = PermissionChecker.get_user_column_permissions(user)
+        return permissions.get(column_name) == 'write'
+    
+    @staticmethod
+    def filter_readable_fields(user, data):
+        """Kullanıcının okuma yetkisi olmadığı alanları filtreler"""
+        if user.is_superuser:
+            return data
+        
+        if isinstance(data, list):
+            return [PermissionChecker.filter_readable_fields(user, item) for item in data]
+        
+        if not isinstance(data, dict):
+            return data
+        
+        permissions = PermissionChecker.get_user_column_permissions(user)
+        filtered_data = {}
+        
+        # Her zaman görünmesi gereken alanlar
+        always_visible = ['id', 'created', 'updated']
+        
+        for key, value in data.items():
+            if key in always_visible or permissions.get(key) in ['read', 'write']:
+                filtered_data[key] = value
+        
+        return filtered_data
+    
+    @staticmethod
+    def validate_writable_fields(user, data):
+        """Kullanıcının yazma yetkisi olmadığı alanları kontrol eder"""
+        if user.is_superuser:
+            return True, None
+        
+        permissions = PermissionChecker.get_user_column_permissions(user)
+        
+        for field in data.keys():
+            if field not in ['id', 'created', 'updated']:  # Bu alanlar zaten değiştirilemez
+                if permissions.get(field) != 'write':
+                    return False, f"'{field}' alanına yazma yetkiniz yok"
+        
+        return True, None
     
     @staticmethod
     def get_user_system_permissions(user):
         """Kullanıcının sistem izinlerini döndürür"""
         if user.is_superuser:
-            return {'work_create': True, 'work_delete': True}
+            return {'work_create': True, 'work_delete': True, 'work_reorder': True}
         
-        permissions = {'work_create': False, 'work_delete': False}
+        permissions = {'work_create': False, 'work_delete': False, 'work_reorder': False}
         
         user_roles = UserRole.objects.filter(user=user).select_related('role')
         
@@ -50,24 +107,6 @@ class PermissionChecker:
                 permissions[perm.permission_type] = True
         
         return permissions
-    
-    @staticmethod
-    def can_read_column(user, column_name):
-        """Kullanıcının belirli bir kolonu okuyup okuyamayacağını kontrol eder"""
-        if user.is_superuser:
-            return True
-            
-        permissions = PermissionChecker.get_user_column_permissions(user)
-        return permissions.get(column_name, 'none') in ['read', 'write']
-    
-    @staticmethod
-    def can_write_column(user, column_name):
-        """Kullanıcının belirli bir kolona yazıp yazamayacağını kontrol eder"""
-        if user.is_superuser:
-            return True
-            
-        permissions = PermissionChecker.get_user_column_permissions(user)
-        return permissions.get(column_name, 'none') == 'write'
     
     @staticmethod
     def can_create_work(user):
@@ -88,46 +127,10 @@ class PermissionChecker:
         return permissions.get('work_delete', False)
     
     @staticmethod
-    def filter_readable_fields(user, data):
-        """Kullanıcının okuma yetkisi olmadığı alanları filtreler"""
+    def can_reorder_work(user):
+        """Kullanıcının iş sıralama yetkisi var mı?"""
         if user.is_superuser:
-            return data
-            
-        permissions = PermissionChecker.get_user_column_permissions(user)
-        filtered_data = {}
+            return True
         
-        # Yetki olan alanları ekle
-        for field, value in data.items():
-            if field in permissions and permissions[field] in ['read', 'write']:
-                filtered_data[field] = value
-        
-        # Sistem alanlarını her zaman ekle
-        for field in PermissionChecker.SYSTEM_FIELDS:
-            if field in data:
-                filtered_data[field] = data[field]
-        
-        return filtered_data
-    
-    @staticmethod
-    def validate_writable_fields(user, data):
-        """Kullanıcının yazma yetkisi olmadığı alanları kontrol eder"""
-        if user.is_superuser:
-            return True, None
-            
-        permissions = PermissionChecker.get_user_column_permissions(user)
-        unauthorized_fields = []
-        
-        # Sistem alanlarını hariç tut
-        excluded_fields = ['id', 'created', 'updated']
-        column_choices = [choice[0] for choice in ColumnPermission.COLUMN_CHOICES]
-        
-        for field in data.keys():
-            if field not in excluded_fields and field in column_choices:
-                if permissions.get(field, 'none') != 'write':
-                    unauthorized_fields.append(field)
-        
-        if unauthorized_fields:
-            field_names = [dict(ColumnPermission.COLUMN_CHOICES).get(f, f) for f in unauthorized_fields]
-            return False, f"Bu alanlara yazma yetkiniz yok: {', '.join(field_names)}"
-        
-        return True, None
+        permissions = PermissionChecker.get_user_system_permissions(user)
+        return permissions.get('work_reorder', False)

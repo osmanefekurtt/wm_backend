@@ -38,10 +38,11 @@ class ColumnPermission(models.Model):
         ('designer_text', 'Tasarımcı (Metin)'),
         ('design_start_date', 'Tasarım Başlangıç Tarihi'),
         ('design_end_date', 'Tasarım Bitiş Tarihi'),
-        ('confirmations', 'Onaylar'),  # confirmations field'ı için
-        ('priority', 'Önem Sırası'),  # YENİ - priority field'ı için
+        ('confirmations', 'Onaylar'),
+        ('priority', 'Önem Sırası'),
         ('material_info', 'Malzeme Bilgileri'),
         ('printing_location', 'Baskı Lokasyonu'),
+        ('printing_locations', 'Baskı Lokasyonları'),  # Yeni eklenen
         ('printing_confirm', 'Baskı Onayı'),
         ('printing_control', 'Baskı Kontrolü'),
         ('printing_controller', 'Kontrolü Yapan Kişi'),
@@ -68,6 +69,7 @@ class ColumnPermission(models.Model):
         verbose_name_plural = 'Kolon Yetkileri'
         unique_together = ['role', 'column_name']
         ordering = ['role', 'column_name']
+
 
 class UserRole(models.Model):
     """Kullanıcı-Rol ilişkisi"""

@@ -85,7 +85,8 @@ class Work(models.Model):
     material_info = models.TextField(verbose_name='Malzeme Bilgileri', blank=True, null=True)
     
     # Baskı bilgileri
-    printing_location = models.CharField(max_length=100, verbose_name='Baskı Lokasyonu', blank=True, null=True)
+    printing_location = models.CharField(max_length=100, verbose_name='Baskı Lokasyonu', blank=True, null=True) # Eski
+    printing_locations = models.JSONField(default=list, blank=True, verbose_name='Baskı Lokasyonları') # Yeni
     printing_confirm = models.BooleanField(verbose_name='Baskı Onayı', default=False)
     printing_control = models.BooleanField(verbose_name='Baskı Kontrolü', default=False)
     printing_controller = models.ForeignKey(

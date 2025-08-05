@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser
 from .models import Role, UserRole, ColumnPermission
 from .serializers import (
-    RoleSerializer, RoleCreateUpdateSerializer, 
+    RoleSerializer, RoleSerializer, 
     UserRoleSerializer, ColumnPermissionSerializer
 )
 from .utils import PermissionChecker
@@ -28,6 +28,7 @@ def get_my_system_permissions(request):
     return Response({
         'work_create': permissions.get('work_create', False),
         'work_delete': permissions.get('work_delete', False),
+        'work_reorder': permissions.get('work_reorder', False),
         'is_superuser': request.user.is_superuser
     })
 
@@ -41,7 +42,7 @@ class RoleViewSet(viewsets.ModelViewSet):
     
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
-            return RoleCreateUpdateSerializer
+            return RoleSerializer
         return RoleSerializer
     
     @action(detail=False, methods=['get'])

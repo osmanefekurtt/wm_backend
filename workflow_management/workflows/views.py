@@ -13,8 +13,8 @@ from workflows.serializer import (
 from .audit_utils import log_work_action
 from permissions.utils import PermissionChecker
 from datetime import datetime
-
 from django.db import transaction
+
 
 class BaseDropdownViewSet(viewsets.ModelViewSet):
     """Dropdown yönetimi için base viewset"""
@@ -294,8 +294,8 @@ class WorkflowViewSet(viewsets.ModelViewSet):
         """Onay ekleme"""
         work = self.get_object()
         
-        # Yeni yetki kontrolü - confirmations yerine confirm_date kontrolü
-        if not PermissionChecker.can_write_column(request.user, 'confirm_date'):
+        # Yeni yetki kontrolü - confirmations field'ı için
+        if not PermissionChecker.can_write_column(request.user, 'confirmations'):
             return Response({'message': 'Onay ekleme yetkiniz yok'}, 
                           status=status.HTTP_403_FORBIDDEN)
         
@@ -346,7 +346,7 @@ class WorkflowViewSet(viewsets.ModelViewSet):
         """Onay silme"""
         work = self.get_object()
         
-        if not PermissionChecker.can_write_column(request.user, 'confirm_date'):
+        if not PermissionChecker.can_write_column(request.user, 'confirmations'):
             return Response({'message': 'Onay silme yetkiniz yok'}, 
                           status=status.HTTP_403_FORBIDDEN)
         
@@ -468,6 +468,90 @@ class WorkflowViewSet(viewsets.ModelViewSet):
         
         self.perform_destroy(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
+    
+
+    @action(detail=True, methods=['post'])
+    def add_printing_location(self, request, pk=None):
+        """Baskı lokasyonu ekleme"""
+        work = self.get_object()
+        
+        if not PermissionChecker.can_write_column(request.user, 'printing_locations'):
+            return Response({'message': 'Baskı lokasyonu ekleme yetkiniz yok'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        
+        location_data = {
+            'location': request.data.get('location', '').strip(),
+            'description': request.data.get('description', '').strip() or None
+        }
+        
+        # Validasyon
+        if not location_data['location']:
+            return Response({'message': 'Lokasyon alanı zorunludur'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        # Aynı lokasyon var mı kontrol et
+        current_locations = work.printing_locations or []
+        if any(loc.get('location') == location_data['location'] for loc in current_locations):
+            return Response({'message': 'Bu lokasyon zaten eklenmiş'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        # Lokasyon ekle
+        location_data['added_by'] = f"{request.user.get_full_name() or request.user.username} ({request.user.id})"
+        location_data['added_at'] = timezone.now().isoformat()
+        
+        current_locations.append(location_data)
+        work.printing_locations = current_locations
+        work.save()
+        
+        # Log
+        log_work_action(
+            user=request.user,
+            work=work,
+            action='update',
+            description=f'Baskı lokasyonu eklendi: {location_data["location"]}'
+        )
+        
+        return Response({
+            'message': 'Baskı lokasyonu eklendi', 
+            'printing_locations': work.printing_locations
+        })
+    
+    @action(detail=True, methods=['post'])
+    def remove_printing_location(self, request, pk=None):
+        """Baskı lokasyonu silme"""
+        work = self.get_object()
+        
+        if not PermissionChecker.can_write_column(request.user, 'printing_locations'):
+            return Response({'message': 'Baskı lokasyonu silme yetkiniz yok'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        
+        location_to_remove = request.data.get('location')
+        if not location_to_remove:
+            return Response({'message': 'Silinecek lokasyon belirtilmeli'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+        
+        current_locations = work.printing_locations or []
+        new_locations = [loc for loc in current_locations if loc.get('location') != location_to_remove]
+        
+        if len(new_locations) == len(current_locations):
+            return Response({'message': 'Lokasyon bulunamadı'}, 
+                          status=status.HTTP_404_NOT_FOUND)
+        
+        work.printing_locations = new_locations
+        work.save()
+        
+        # Log
+        log_work_action(
+            user=request.user,
+            work=work,
+            action='update',
+            description=f'Baskı lokasyonu silindi: {location_to_remove}'
+        )
+        
+        return Response({
+            'message': 'Baskı lokasyonu silindi', 
+            'printing_locations': work.printing_locations
+        })
 
 
 class MovementViewSet(viewsets.ReadOnlyModelViewSet):

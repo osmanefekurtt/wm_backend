@@ -1,135 +1,153 @@
+# permissions/serializers.py
 from rest_framework import serializers
 from .models import Role, ColumnPermission, UserRole, SystemPermission
 from django.contrib.auth.models import User
 
 
 class ColumnPermissionSerializer(serializers.ModelSerializer):
-    """Kolon yetkileri"""
-    column_display = serializers.CharField(source='get_column_name_display', read_only=True)
-    permission_display = serializers.CharField(source='get_permission_display', read_only=True)
-    
     class Meta:
         model = ColumnPermission
-        fields = ['id', 'column_name', 'column_display', 'permission', 'permission_display']
+        fields = ['column_name', 'permission']
 
 
 class SystemPermissionSerializer(serializers.ModelSerializer):
-    """Sistem izinleri"""
-    permission_display = serializers.CharField(source='get_permission_type_display', read_only=True)
-    
     class Meta:
         model = SystemPermission
-        fields = ['id', 'permission_type', 'permission_display', 'granted']
+        fields = ['permission_type', 'granted']
 
 
 class RoleSerializer(serializers.ModelSerializer):
-    """Rol detayları"""
     column_permissions = ColumnPermissionSerializer(many=True, read_only=True)
     system_permissions = SystemPermissionSerializer(many=True, read_only=True)
+    permissions = serializers.DictField(write_only=True, required=False)
+    system_permissions_data = serializers.DictField(write_only=True, required=False)
     
     class Meta:
         model = Role
-        fields = ['id', 'name', 'description', 'column_permissions', 'system_permissions', 'created', 'updated']
-        read_only_fields = ['created', 'updated']
-
-
-class RoleCreateUpdateSerializer(serializers.ModelSerializer):
-    """Rol oluşturma ve güncelleme"""
-    permissions = serializers.DictField(
-        child=serializers.ChoiceField(choices=['none', 'read', 'write']),
-        write_only=True,
-        required=False
-    )
-    system_permissions = serializers.DictField(
-        child=serializers.BooleanField(),
-        write_only=True,
-        required=False
-    )
-    
-    class Meta:
-        model = Role
-        fields = ['name', 'description', 'permissions', 'system_permissions']
-    
-    def _handle_permissions(self, role, permissions_data, permission_model, choices_attr):
-        """Yetki oluşturma/güncelleme için yardımcı method"""
-        if permissions_data is None:
-            return
-            
-        # Mevcut yetkileri sil
-        if permission_model == ColumnPermission:
-            role.column_permissions.all().delete()
-        else:
-            role.system_permissions.all().delete()
-        
-        # Yeni yetkileri oluştur
-        valid_choices = [choice[0] for choice in getattr(permission_model, choices_attr)]
-        
-        for key, value in permissions_data.items():
-            if key in valid_choices:
-                if permission_model == ColumnPermission:
-                    permission_model.objects.create(role=role, column_name=key, permission=value)
-                else:
-                    permission_model.objects.create(role=role, permission_type=key, granted=value)
+        fields = ['id', 'name', 'description', 'created', 'updated', 
+                  'column_permissions', 'system_permissions', 
+                  'permissions', 'system_permissions_data']
+        read_only_fields = ['id', 'created', 'updated', 'column_permissions', 'system_permissions']
     
     def create(self, validated_data):
         permissions_data = validated_data.pop('permissions', {})
-        system_permissions_data = validated_data.pop('system_permissions', {})
+        system_permissions_data = validated_data.pop('system_permissions_data', {})
         
         role = Role.objects.create(**validated_data)
         
-        # Column permissions
-        if permissions_data:
-            role.column_permissions.all().delete()
-            self._handle_permissions(role, permissions_data, ColumnPermission, 'COLUMN_CHOICES')
+        # Create column permissions
+        self._handle_permissions(role, permissions_data, ColumnPermission, 'COLUMN_CHOICES')
         
-        # System permissions
-        self._handle_permissions(role, system_permissions_data, SystemPermission, 'PERMISSION_CHOICES')
+        # Create system permissions
+        self._handle_permissions(role, system_permissions_data, SystemPermission, 'PERMISSION_TYPE_CHOICES')
         
         return role
     
-    def update(self, instance, validated_data):
-        permissions_data = validated_data.pop('permissions', None)
-        system_permissions_data = validated_data.pop('system_permissions', None)
+    def _handle_permissions(self, role, permissions_data, permission_model, choices_attr):
+        """Handle both column and system permissions"""
+        if permission_model == ColumnPermission:
+            # Handle column permissions
+            valid_choices = [choice[0] for choice in getattr(permission_model, choices_attr)]
+            
+            for column_name, permission in permissions_data.items():
+                if column_name in valid_choices:
+                    permission_model.objects.update_or_create(
+                        role=role,
+                        column_name=column_name,
+                        defaults={'permission': permission}
+                    )
         
-        # Rol bilgilerini güncelle
+        elif permission_model == SystemPermission:
+            # Handle system permissions
+            print(f"Handling system permissions: {permissions_data}")  # Debug
+            valid_choices = [choice[0] for choice in getattr(permission_model, choices_attr)]
+            print(f"Valid choices: {valid_choices}")  # Debug
+            
+            for permission_type, granted in permissions_data.items():
+                if permission_type in valid_choices:
+                    obj, created = permission_model.objects.update_or_create(
+                        role=role,
+                        permission_type=permission_type,
+                        defaults={'granted': granted}
+                    )
+                    print(f"{'Created' if created else 'Updated'} {permission_type}: {granted}")  # Debug
+    
+    def update(self, instance, validated_data):
+        permissions_data = validated_data.pop('permissions', {})
+        system_permissions_data = validated_data.pop('system_permissions_data', {})
+        
+        # Update basic fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         
-        # Permissions güncelle
-        self._handle_permissions(instance, permissions_data, ColumnPermission, 'COLUMN_CHOICES')
-        self._handle_permissions(instance, system_permissions_data, SystemPermission, 'PERMISSION_CHOICES')
+        # Update column permissions
+        if permissions_data:
+            # Clear existing permissions
+            ColumnPermission.objects.filter(role=instance).delete()
+            
+            # Create new permissions
+            self._handle_permissions(instance, permissions_data, ColumnPermission, 'COLUMN_CHOICES')
+        
+        # Update system permissions
+        if system_permissions_data:
+            # Don't delete existing, just update
+            self._handle_permissions(instance, system_permissions_data, SystemPermission, 'PERMISSION_TYPE_CHOICES')
         
         return instance
+    
+    def to_representation(self, instance):
+        """Include permissions in the response"""
+        data = super().to_representation(instance)
+        
+        # Add column permissions as dict
+        column_perms = {}
+        for perm in instance.column_permissions.all():
+            column_perms[perm.column_name] = perm.permission
+        data['permissions'] = column_perms
+        
+        # Add system permissions as dict
+        system_perms = {}
+        # Varsayılan değerleri ayarla
+        default_system_perms = {
+            'work_create': False,
+            'work_delete': False,
+            'work_reorder': False
+        }
+        
+        # Veritabanındaki değerleri al
+        for perm in instance.system_permissions.all():
+            system_perms[perm.permission_type] = perm.granted
+        
+        # Eksik olanları varsayılan değerlerle doldur
+        for perm_type, default_value in default_system_perms.items():
+            if perm_type not in system_perms:
+                system_perms[perm_type] = default_value
+                
+        data['system_permissions_dict'] = system_perms
+        
+        return data
 
 
 class UserRoleSerializer(serializers.ModelSerializer):
-    """Kullanıcı-Rol ilişkisi"""
-    user_detail = serializers.SerializerMethodField()
-    role_detail = RoleSerializer(source='role', read_only=True)
-    assigned_by_detail = serializers.SerializerMethodField()
+    user_display = serializers.CharField(source='user.username', read_only=True)
+    role_display = serializers.CharField(source='role.name', read_only=True)
     
     class Meta:
         model = UserRole
-        fields = ['id', 'user', 'user_detail', 'role', 'role_detail', 'assigned_by_detail', 'assigned_at']
-        read_only_fields = ['assigned_by', 'assigned_at']
+        fields = ['id', 'user', 'role', 'user_display', 'role_display', 
+                  'assigned_by', 'assigned_at']
+        read_only_fields = ['id', 'assigned_by', 'assigned_at']
+
+
+class UserSerializer(serializers.ModelSerializer):
+    roles = serializers.SerializerMethodField()
     
-    def get_user_detail(self, obj):
-        return {
-            'id': obj.user.id,
-            'username': obj.user.username,
-            'full_name': obj.user.get_full_name() or obj.user.username
-        }
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 
+                  'is_active', 'is_staff', 'is_superuser', 'roles']
     
-    def get_assigned_by_detail(self, obj):
-        if not obj.assigned_by:
-            return None
-        return {
-            'id': obj.assigned_by.id,
-            'username': obj.assigned_by.username,
-            'full_name': obj.assigned_by.get_full_name() or obj.assigned_by.username
-        }
-    
-    def create(self, validated_data):
-        validated_data['assigned_by'] = self.context['request'].user
-        return super().create(validated_data)
+    def get_roles(self, obj):
+        user_roles = UserRole.objects.filter(user=obj).select_related('role')
+        return [{'id': ur.role.id, 'name': ur.role.name} for ur in user_roles]
