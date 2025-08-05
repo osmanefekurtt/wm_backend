@@ -95,6 +95,50 @@ class ConfirmationListField(serializers.ListField):
         } for confirmation in value]
 
 
+class PrintingLocationListField(serializers.ListField):
+    """Baskı lokasyonları için özel field"""
+    
+    def to_internal_value(self, data):
+        if not isinstance(data, list):
+            raise serializers.ValidationError('Baskı lokasyonları liste formatında olmalıdır.')
+        
+        validated_locations = []
+        seen_locations = set()
+        
+        for i, item in enumerate(data):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(f'Lokasyon {i+1}: Geçersiz format')
+            
+            location = item.get('location', '').strip()
+            if not location:
+                raise serializers.ValidationError(f'Lokasyon {i+1}: Lokasyon alanı zorunludur')
+            
+            # Duplicate kontrolü
+            if location in seen_locations:
+                raise serializers.ValidationError(f'Lokasyon {i+1}: "{location}" zaten eklenmiş')
+            
+            seen_locations.add(location)
+            
+            validated_locations.append({
+                'location': location,
+                'description': item.get('description', '').strip() or None,
+                'added_at': item.get('added_at') or timezone.now().isoformat(),
+                'added_by': item.get('added_by')
+            })
+        
+        return validated_locations
+    
+    def to_representation(self, value):
+        """Çıktıda gereksiz None değerleri temizle"""
+        if not value:
+            return []
+        
+        return [{
+            'location': loc.get('location'),
+            **{k: v for k, v in loc.items() if k != 'location' and v is not None}
+        } for loc in value]
+
+
 class BaseDropdownSerializer(serializers.ModelSerializer):
     """Dropdown modelleri için base serializer"""
     class Meta:
@@ -134,6 +178,7 @@ class WorkflowSerializer(serializers.ModelSerializer):
     # JSON fields
     links = LinkListField(required=False, allow_empty=True)
     confirmations = ConfirmationListField(required=False, allow_empty=True)
+    printing_locations = PrintingLocationListField(required=False, allow_empty=True)  # YENİ EKLENEN
     
     # Foreign key fields
     category = serializers.PrimaryKeyRelatedField(
@@ -167,11 +212,11 @@ class WorkflowSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'category', 'price', 'type', 'sales_channel',
             'designer', 'designer_text', 'design_start_date', 'design_end_date',
-            'confirmations', 'material_info', 'printing_location', 'printing_confirm',
-            'printing_control', 'printing_controller', 'printing_controller_text',
+            'confirmations', 'material_info', 'printing_location', 'printing_locations',  # printing_locations eklendi
+            'printing_confirm', 'printing_control', 'printing_controller', 'printing_controller_text',
             'printing_control_date', 'printing_start_date', 'printing_end_date',
             'mixed', 'packaging_date', 'stock_entry', 'shipping_date',
-            'links', 'note', 'priority', 'created', 'updated',  # priority eklendi
+            'links', 'note', 'priority', 'created', 'updated',
             # Calculated fields
             'status_code', 'status_text', 'status_color',
             # Detail fields
@@ -248,6 +293,12 @@ class WorkflowSerializer(serializers.ModelSerializer):
                 for confirmation in validated_data['confirmations']:
                     confirmation['added_by'] = user_info
                     confirmation['added_at'] = timestamp
+            
+            # Printing locations'a kullanıcı bilgisi ekle
+            if validated_data.get('printing_locations'):
+                for location in validated_data['printing_locations']:
+                    location['added_by'] = user_info
+                    location['added_at'] = timestamp
         
         return super().create(validated_data)
     
@@ -272,6 +323,24 @@ class WorkflowSerializer(serializers.ModelSerializer):
                 if confirmation.get('date') not in existing_dates:
                     confirmation['added_by'] = user_info
                     confirmation['added_at'] = timestamp
+        
+        # Printing locations güncellemesi için kullanıcı bilgisi ekle
+        if 'printing_locations' in validated_data and request:
+            user = request.user
+            user_info = f"{user.get_full_name() or user.username} ({user.id})"
+            timestamp = timezone.now().isoformat()
+            
+            # Yeni eklenen lokasyonları tespit et
+            new_locations = validated_data.get('printing_locations', [])
+            existing_locations = instance.printing_locations or []
+            
+            # Yeni lokasyonları bul
+            existing_location_names = {loc.get('location') for loc in existing_locations}
+            
+            for location in new_locations:
+                if location.get('location') not in existing_location_names:
+                    location['added_by'] = user_info
+                    location['added_at'] = timestamp
         
         # Printing control date
         if validated_data.get('printing_control') and not instance.printing_control:
