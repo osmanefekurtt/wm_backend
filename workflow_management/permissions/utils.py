@@ -68,9 +68,24 @@ class PermissionChecker:
         filtered_data = {}
         
         # Her zaman görünmesi gereken alanlar
-        always_visible = ['id', 'created', 'updated']
+        always_visible = [
+            'id', 'created', 'updated',
+            # Status alanları
+            'status_code', 'status_text', 'status_color',
+            # Detail alanları - read-only oldukları için
+            'category_detail', 'type_detail', 'sales_channel_detail',
+            'designer_detail', 'printing_controller_detail',
+            # Uyumluluk için eklenen name alanları
+            'category_name', 'type_name', 'sales_channel_name',
+            'designer_name', 'printing_controller_name',
+            # Diğer calculated/readonly alanlar
+            'designer_display', 'printing_controller_display',
+            'confirm_date',  # Legacy alan
+            'link', 'link_title'  # Legacy alanlar
+        ]
         
         for key, value in data.items():
+            # Her zaman görünür alanlar veya yetkili alanlar
             if key in always_visible or permissions.get(key) in ['read', 'write']:
                 filtered_data[key] = value
         
@@ -84,8 +99,20 @@ class PermissionChecker:
         
         permissions = PermissionChecker.get_user_column_permissions(user)
         
+        # Read-only ve sistem alanları - bunlar zaten değiştirilemez
+        read_only_fields = [
+            'id', 'created', 'updated', 'printing_control_date',
+            'status_code', 'status_text', 'status_color',
+            'category_detail', 'type_detail', 'sales_channel_detail',
+            'designer_detail', 'printing_controller_detail',
+            'category_name', 'type_name', 'sales_channel_name',
+            'designer_name', 'printing_controller_name',
+            'designer_display', 'printing_controller_display',
+            'link', 'link_title', 'confirm_date'
+        ]
+        
         for field in data.keys():
-            if field not in ['id', 'created', 'updated']:  # Bu alanlar zaten değiştirilemez
+            if field not in read_only_fields:
                 if permissions.get(field) != 'write':
                     return False, f"'{field}' alanına yazma yetkiniz yok"
         

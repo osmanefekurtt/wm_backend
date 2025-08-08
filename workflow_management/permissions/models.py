@@ -42,11 +42,12 @@ class ColumnPermission(models.Model):
         ('priority', 'Önem Sırası'),
         ('material_info', 'Malzeme Bilgileri'),
         ('printing_location', 'Baskı Lokasyonu'),
-        ('printing_locations', 'Baskı Lokasyonları'),  # Yeni eklenen
+        ('printing_locations', 'Baskı Lokasyonları'),
         ('printing_confirm', 'Baskı Onayı'),
         ('printing_control', 'Baskı Kontrolü'),
         ('printing_controller', 'Kontrolü Yapan Kişi'),
         ('printing_controller_text', 'Kontrolü Yapan (Metin)'),
+        ('printing_control_date', 'Kontrol Tarihi'),  # YENİ
         ('printing_start_date', 'Baskı Başlangıç Tarihi'),
         ('printing_end_date', 'Baskı Bitiş Tarihi'),
         ('mixed', 'Karışık'),
@@ -55,6 +56,15 @@ class ColumnPermission(models.Model):
         ('shipping_date', 'Sevkiyat Tarihi'),
         ('links', 'Bağlantılar'),
         ('note', 'Not'),
+        # YENİ EKLENENLER - Detail alanları için
+        ('category_detail', 'Kategori Detayı'),
+        ('type_detail', 'Tip Detayı'),
+        ('sales_channel_detail', 'Satış Kanalı Detayı'),
+        ('designer_detail', 'Tasarımcı Detayı'),
+        ('printing_controller_detail', 'Kontrolör Detayı'),
+        ('status_code', 'Durum Kodu'),
+        ('status_text', 'Durum Metni'),
+        ('status_color', 'Durum Rengi'),
     ]
     
     role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name='column_permissions', verbose_name='Rol')
