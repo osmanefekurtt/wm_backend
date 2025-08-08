@@ -430,8 +430,7 @@ class WorkflowViewSet(viewsets.ModelViewSet):
         # Yazma yetkisi kontrolü
         is_valid, error_message = PermissionChecker.validate_writable_fields(request.user, request.data)
         if not is_valid:
-            return Response({'message': error_message}, 
-                          status=status.HTTP_403_FORBIDDEN)
+            return Response({'message': error_message}, status=status.HTTP_403_FORBIDDEN)
         
         # Eski verileri al
         old_data = self._get_instance_data(instance)

@@ -113,6 +113,7 @@ class PermissionChecker:
         
         for field in data.keys():
             if field not in read_only_fields:
+                if field == "designer_text": field = "designer"
                 if permissions.get(field) != 'write':
                     return False, f"'{field}' alanına yazma yetkiniz yok"
         
